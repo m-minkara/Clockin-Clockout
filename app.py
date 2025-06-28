@@ -1,0 +1,109 @@
+import streamlit as st
+import pandas as pd
+import re
+from datetime import datetime, timedelta
+
+st.set_page_config(page_title="WhatsApp Work Hours", layout="centered")
+
+st.title("🕒 WhatsApp Work Hours Calculator")
+st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total hours worked per person, per week.")
+
+uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"])
+
+def parse_custom_format(file_text):
+    pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})\u202f([APM]+)\] (.*?): (.*)"
+    records = []
+
+    for line in file_text.splitlines():
+        match = re.match(pattern, line)
+        if match:
+            date_str, time_str, ampm, name, message = match.groups()
+            timestamp_str = f"{date_str} {time_str} {ampm}"
+            try:
+                timestamp = datetime.strptime(timestamp_str, "%m/%d/%y %I:%M:%S %p")
+                records.append({
+                    "name": name.strip(),
+                    "timestamp": timestamp,
+                    "message": message.strip().lower()
+                })
+            except ValueError:
+                continue
+    return pd.DataFrame(records)
+
+def get_week_range(date):
+    monday = date - timedelta(days=date.weekday())
+    sunday = monday + timedelta(days=6)
+    return f"{monday.strftime('%b %d')} - {sunday.strftime('%b %d')}"
+
+def calculate_hours(df):
+    df = df[df['message'].str.contains(r'\bin\b|\bout\b', na=False)].copy()
+    df['week'] = df['timestamp'].dt.isocalendar().week
+    df['year'] = df['timestamp'].dt.isocalendar().year
+    df['date'] = df['timestamp'].dt.date
+
+    latest_weeks = df[['year', 'week']].drop_duplicates().sort_values(['year', 'week'], ascending=False).head(4)
+    df = df.merge(latest_weeks, on=['year', 'week'])
+
+    daily_records = []
+    weekly_summary = []
+
+    for (name, date), group in df.groupby(['name', 'date']):
+        group = group.sort_values(by='timestamp')
+        times = group['timestamp'].tolist()
+        messages = group['message'].tolist()
+        total = timedelta()
+        i = 0
+        while i < len(messages) - 1:
+            if 'in' in messages[i] and 'out' in messages[i + 1]:
+                total += times[i + 1] - times[i]
+                clock_in = times[i].strftime('%I:%M %p')
+                clock_out = times[i + 1].strftime('%I:%M %p')
+                week_range = get_week_range(times[i])
+                daily_records.append({
+                    'Name': name,
+                    'Date': date.strftime('%b %d, %Y'),
+                    'Week': week_range,
+                    'Clock In': clock_in,
+                    'Clock Out': clock_out,
+                    'Hours Worked': round((times[i + 1] - times[i]).total_seconds() / 3600, 2)
+                })
+                i += 2
+            else:
+                i += 1
+
+    daily_df = pd.DataFrame(daily_records)
+
+    if not daily_df.empty:
+        weekly_summary = (
+            daily_df.groupby(['Name', 'Week'])['Hours Worked']
+            .sum().reset_index()
+            .rename(columns={'Hours Worked': 'Total Hours'})
+        )
+
+    return daily_df, weekly_summary
+
+if uploaded_file:
+    file_text = uploaded_file.read().decode("utf-8")
+    df = parse_custom_format(file_text)
+
+    if df.empty or "message" not in df.columns:
+        st.error("❌ Format issue: Could not extract messages. Please upload a valid WhatsApp group .txt file.")
+    else:
+        daily_df, weekly_df = calculate_hours(df)
+
+        if daily_df.empty:
+            st.warning("⚠️ No valid IN/OUT pairs found.")
+        else:
+            st.success("✅ Successfully processed the chat file!")
+
+            st.subheader("🧾 Daily Work Log")
+            st.dataframe(daily_df)
+
+            st.download_button("📥 Download Daily Logs", data=daily_df.to_csv(index=False).encode('utf-8'),
+                               file_name="daily_work_log.csv", mime="text/csv")
+
+            st.subheader("📊 Weekly Total Hours per Person")
+            st.dataframe(weekly_df)
+
+            st.download_button("📥 Download Weekly Summary", data=weekly_df.to_csv(index=False).encode('utf-8'),
+                               file_name="weekly_summary.csv", mime="text/csv")
