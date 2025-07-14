@@ -6,14 +6,15 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="WhatsApp Work Hours", layout="centered")
 
 st.title("🕒 WhatsApp Work Hours Calculator")
-st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total hours worked per person, per week.")
+st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total hours worked per person.")
 
+# --- File Uploader ---
 uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"])
 
+# --- Helper Functions ---
 def parse_custom_format(file_text):
     pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})\u202f([APM]+)\] (.*?): (.*)"
     records = []
-
     for line in file_text.splitlines():
         match = re.match(pattern, line)
         if match:
@@ -33,39 +34,40 @@ def parse_custom_format(file_text):
 def get_week_range(date):
     monday = date - timedelta(days=date.weekday())
     sunday = monday + timedelta(days=6)
-    return f"{monday.strftime('%b %d')} - {sunday.strftime('%b %d')}"
+    return monday, sunday, f"{monday.strftime('%b %d')} - {sunday.strftime('%b %d')} {sunday.year}"
 
 def calculate_hours(df):
-    df = df[df['message'].str.contains(r'\bin\b|\bout\b', na=False)].copy()
+    df = df[df['message'].str.contains(r'\bin\b|\bout\b|\blunch\b', na=False)].copy()
+    df['date'] = df['timestamp'].dt.date
     df['week'] = df['timestamp'].dt.isocalendar().week
     df['year'] = df['timestamp'].dt.isocalendar().year
-    df['date'] = df['timestamp'].dt.date
 
     latest_weeks = df[['year', 'week']].drop_duplicates().sort_values(['year', 'week'], ascending=False).head(4)
     df = df.merge(latest_weeks, on=['year', 'week'])
 
     daily_records = []
-    weekly_summary = []
 
     for (name, date), group in df.groupby(['name', 'date']):
         group = group.sort_values(by='timestamp')
         times = group['timestamp'].tolist()
         messages = group['message'].tolist()
-        total = timedelta()
         i = 0
         while i < len(messages) - 1:
-            if 'in' in messages[i] and 'out' in messages[i + 1]:
-                total += times[i + 1] - times[i]
+            msg1 = messages[i]
+            msg2 = messages[i + 1]
+            # Consider both "out" and "lunch" as clock out
+            if 'in' in msg1 and ('out' in msg2 or 'lunch' in msg2):
+                duration = times[i + 1] - times[i]
                 clock_in = times[i].strftime('%I:%M %p')
                 clock_out = times[i + 1].strftime('%I:%M %p')
-                week_range = get_week_range(times[i])
+                week_range = get_week_range(times[i])[2]
                 daily_records.append({
                     'Name': name,
                     'Date': date.strftime('%b %d, %Y'),
                     'Week': week_range,
                     'Clock In': clock_in,
                     'Clock Out': clock_out,
-                    'Hours Worked': round((times[i + 1] - times[i]).total_seconds() / 3600, 2)
+                    'Hours Worked': round(duration.total_seconds() / 3600, 2)
                 })
                 i += 2
             else:
@@ -79,9 +81,29 @@ def calculate_hours(df):
             .sum().reset_index()
             .rename(columns={'Hours Worked': 'Total Hours'})
         )
+    else:
+        weekly_summary = pd.DataFrame()
 
     return daily_df, weekly_summary
 
+def get_last_week_data(daily_df):
+    today = datetime.now().date()
+    this_monday = today - timedelta(days=today.weekday())
+    last_monday = this_monday - timedelta(days=7)
+    last_sunday = last_monday + timedelta(days=6)
+
+    last_week_df = daily_df[
+        pd.to_datetime(daily_df['Date']).dt.date.between(last_monday, last_sunday)
+    ]
+
+    if not last_week_df.empty:
+        total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
+        total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
+        last_week_df = last_week_df.merge(total_hours, on="Name")
+
+    return last_week_df, last_monday, last_sunday
+
+# --- Main Execution ---
 if uploaded_file:
     file_text = uploaded_file.read().decode("utf-8")
     df = parse_custom_format(file_text)
@@ -96,14 +118,31 @@ if uploaded_file:
         else:
             st.success("✅ Successfully processed the chat file!")
 
+            # --- Daily Work Log ---
             st.subheader("🧾 Daily Work Log")
             st.dataframe(daily_df)
+            st.download_button("📥 Download Daily Logs",
+                               data=daily_df.to_csv(index=False).encode('utf-8'),
+                               file_name="Daily_Work_Log.csv",
+                               mime="text/csv")
 
-            st.download_button("📥 Download Daily Logs", data=daily_df.to_csv(index=False).encode('utf-8'),
-                               file_name="daily_work_log.csv", mime="text/csv")
-
+            # --- Weekly Summary ---
             st.subheader("📊 Weekly Total Hours per Person")
             st.dataframe(weekly_df)
+            st.download_button("📥 Download Weekly Summary",
+                               data=weekly_df.to_csv(index=False).encode('utf-8'),
+                               file_name="Weekly_Total_Hours_Summary.csv",
+                               mime="text/csv")
 
-            st.download_button("📥 Download Weekly Summary", data=weekly_df.to_csv(index=False).encode('utf-8'),
-                               file_name="weekly_summary.csv", mime="text/csv")
+            # --- Last Week Workday Timesheet ---
+            last_week_df, last_monday, last_sunday = get_last_week_data(daily_df)
+            if not last_week_df.empty:
+                title = f"{last_monday.strftime('%b %d')} - {last_sunday.strftime('%b %d')} {last_sunday.year} WORKDAY TIMESHEET"
+                st.subheader(f"📆 {title}")
+                st.dataframe(last_week_df)
+
+                csv_name = title.replace(" ", "_") + ".csv"
+                st.download_button(f"📥 Download {title}",
+                                   data=last_week_df.to_csv(index=False).encode('utf-8'),
+                                   file_name=csv_name,
+                                   mime="text/csv")
