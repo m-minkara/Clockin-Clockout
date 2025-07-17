@@ -157,7 +157,7 @@ if uploaded_file:
                                    data=to_excel(last_week_df),
                                    file_name=file_name,
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-[1:01 PM, 7/17/2025] Tanay Malviya: import streamlit as st
+import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime, timedelta
