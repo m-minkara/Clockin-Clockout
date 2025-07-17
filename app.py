@@ -2,18 +2,18 @@ import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime, timedelta
+from io import BytesIO
 
 st.set_page_config(page_title="WhatsApp Work Hours", layout="centered")
 
 st.title("🕒 WhatsApp Work Hours Calculator")
 st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total hours worked per person.")
 
-# --- File Uploader ---
 uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"])
 
 # --- Helper Functions ---
 def parse_custom_format(file_text):
-    pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})\u202f([APM]+)\] (.*?): (.*)"
+    pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})\u202f([APM]+)\] (.?): (.)"
     records = []
     for line in file_text.splitlines():
         match = re.match(pattern, line)
@@ -55,7 +55,6 @@ def calculate_hours(df):
         while i < len(messages) - 1:
             msg1 = messages[i]
             msg2 = messages[i + 1]
-            # Consider both "out" and "lunch" as clock out
             if 'in' in msg1 and ('out' in msg2 or 'lunch' in msg2):
                 duration = times[i + 1] - times[i]
                 clock_in = times[i].strftime('%I:%M %p')
@@ -101,7 +100,19 @@ def get_last_week_data(daily_df):
         total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
         last_week_df = last_week_df.merge(total_hours, on="Name")
 
+        # Show total only once per person
+        last_week_df["Total Hours This Week"] = last_week_df.apply(
+            lambda row: row["Total Hours This Week"] if last_week_df[last_week_df["Name"] == row["Name"]].index[0] == row.name else "",
+            axis=1
+        )
+
     return last_week_df, last_monday, last_sunday
+
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+    return output.getvalue()
 
 # --- Main Execution ---
 if uploaded_file:
@@ -122,17 +133,17 @@ if uploaded_file:
             st.subheader("🧾 Daily Work Log")
             st.dataframe(daily_df)
             st.download_button("📥 Download Daily Logs",
-                               data=daily_df.to_csv(index=False).encode('utf-8'),
-                               file_name="Daily_Work_Log.csv",
-                               mime="text/csv")
+                               data=to_excel(daily_df),
+                               file_name="Daily Work Log.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
             # --- Weekly Summary ---
             st.subheader("📊 Weekly Total Hours per Person")
             st.dataframe(weekly_df)
             st.download_button("📥 Download Weekly Summary",
-                               data=weekly_df.to_csv(index=False).encode('utf-8'),
-                               file_name="Weekly_Total_Hours_Summary.csv",
-                               mime="text/csv")
+                               data=to_excel(weekly_df),
+                               file_name="Weekly Total Hours Summary.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
             # --- Last Week Workday Timesheet ---
             last_week_df, last_monday, last_sunday = get_last_week_data(daily_df)
@@ -141,8 +152,8 @@ if uploaded_file:
                 st.subheader(f"📆 {title}")
                 st.dataframe(last_week_df)
 
-                csv_name = title.replace(" ", "_") + ".csv"
+                file_name = f"{title}.xlsx"
                 st.download_button(f"📥 Download {title}",
-                                   data=last_week_df.to_csv(index=False).encode('utf-8'),
-                                   file_name=csv_name,
-                                   mime="text/csv")
+                                   data=to_excel(last_week_df),
+                                   file_name=file_name,
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
