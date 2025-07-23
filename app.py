@@ -2,39 +2,35 @@ import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime, timedelta
+from io import BytesIO
 
 st.set_page_config(page_title="WhatsApp Work Hours", layout="centered")
 
-st.title("🕒 WhatsApp Work Hours Calculator") 
+st.title("🕒 WhatsApp Work Hours Calculator")
 st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total hours worked per person.")
 
-# --- File Uploader ---
-uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"])
+uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"], key="whatsapp_upload_1")
 
 # --- Helper Functions ---
 def parse_custom_format(file_text):
-    pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})\s?([APM]+)\] (.*?): (.*)"
+    pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})(?:\u202f|\xa0)?([APM]+)\] (.*?): (.*)"
     records = []
     for line in file_text.splitlines():
         match = re.match(pattern, line)
         if match:
             date_str, time_str, ampm, name, message = match.groups()
             timestamp_str = f"{date_str} {time_str} {ampm}"
-            try:
-                timestamp = datetime.strptime(timestamp_str, "%m/%d/%y %I:%M:%S %p")
-            except ValueError:
+            for fmt in ("%m/%d/%y %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p"):
                 try:
-                    timestamp = datetime.strptime(timestamp_str, "%d/%m/%Y %I:%M:%S %p")
+                    timestamp = datetime.strptime(timestamp_str, fmt)
+                    records.append({
+                        "name": name.strip(),
+                        "timestamp": timestamp,
+                        "message": message.strip().lower()
+                    })
+                    break
                 except ValueError:
-                    try:
-                        timestamp = datetime.strptime(timestamp_str, "%d/%m/%y %I:%M:%S %p")
-                    except:
-                        continue
-            records.append({
-                "name": name.strip(),  
-                "timestamp": timestamp,
-                "message": message.strip().lower()
-            })
+                    continue
     return pd.DataFrame(records)
 
 def get_week_range(date):
@@ -61,6 +57,8 @@ def calculate_hours(df):
         while i < len(messages) - 1:
             msg1 = messages[i]
             msg2 = messages[i + 1]
+            # Clock In keywords: in, back, return
+            # Clock Out keywords: out, lunch
             if any(x in msg1 for x in ['in', 'back', 'return']) and any(x in msg2 for x in ['out', 'lunch']):
                 duration = times[i + 1] - times[i]
                 clock_in = times[i].strftime('%I:%M %p')
@@ -105,8 +103,17 @@ def get_last_week_data(daily_df):
         total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
         total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
         last_week_df = last_week_df.merge(total_hours, on="Name")
+        last_week_df["Total Hours This Week"] = last_week_df.groupby("Name")["Total Hours This Week"].transform(
+            lambda x: [x.iat[0]] + [""] * (len(x) - 1)
+        )
 
     return last_week_df, last_monday, last_sunday
+
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+    return output.getvalue()
 
 # --- Main Execution ---
 if uploaded_file:
@@ -123,31 +130,27 @@ if uploaded_file:
         else:
             st.success("✅ Successfully processed the chat file!")
 
-            # --- Daily Work Log ---
             st.subheader("🧾 Daily Work Log")
             st.dataframe(daily_df)
-            st.download_button("📥 Download Daily Logs",
-                               data=daily_df.to_csv(index=False).encode('utf-8'),
-                               file_name="Daily_Work_Log.csv",
-                               mime="text/csv")
+            st.download_button("📥 Download Daily Logs (Excel)",
+                               data=to_excel(daily_df),
+                               file_name="Daily Work Log.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-            # --- Weekly Summary ---
             st.subheader("📊 Weekly Total Hours per Person")
             st.dataframe(weekly_df)
-            st.download_button("📥 Download Weekly Summary",
-                               data=weekly_df.to_csv(index=False).encode('utf-8'),
-                               file_name="Weekly_Total_Hours_Summary.csv",
-                               mime="text/csv")
+            st.download_button("📥 Download Weekly Summary (Excel)",
+                               data=to_excel(weekly_df),
+                               file_name="Weekly Total Hours Summary.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-            # --- Last Week Workday Timesheet ---
             last_week_df, last_monday, last_sunday = get_last_week_data(daily_df)
             if not last_week_df.empty:
                 title = f"{last_monday.strftime('%b %d')} - {last_sunday.strftime('%b %d')} {last_sunday.year} WORKDAY TIMESHEET"
                 st.subheader(f"📆 {title}")
                 st.dataframe(last_week_df)
 
-                csv_name = title.replace(" ", "_") + ".csv"
                 st.download_button(f"📥 Download {title}",
-                                   data=last_week_df.to_csv(index=False).encode('utf-8'),
-                                   file_name=csv_name,
-                                   mime="text/csv")
+                                   data=to_excel(last_week_df),
+                                   file_name=f"{title}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
