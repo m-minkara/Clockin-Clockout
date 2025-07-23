@@ -11,6 +11,7 @@ st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total 
 
 uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"], key="whatsapp_upload_1")
 
+
 # --- Helper Functions ---
 def parse_custom_format(file_text):
     pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})(?:\u202f|\xa0)?([APM]+)\] (.*?): (.*)"
@@ -33,13 +34,15 @@ def parse_custom_format(file_text):
                     continue
     return pd.DataFrame(records)
 
+
 def get_week_range(date):
     monday = date - timedelta(days=date.weekday())
     sunday = monday + timedelta(days=6)
     return monday, sunday, f"{monday.strftime('%b %d')} - {sunday.strftime('%b %d')} {sunday.year}"
 
+
 def calculate_hours(df):
-    df = df[df['message'].str.contains(r'\bin\b|\bout\b|\blunch\b|\bback\b|\breturn\b', na=False)].copy()
+    df = df[df['message'].str.contains(r'\bin\b|\bout\b|\blunch\b', na=False)].copy()
     df['date'] = df['timestamp'].dt.date
     df['week'] = df['timestamp'].dt.isocalendar().week
     df['year'] = df['timestamp'].dt.isocalendar().year
@@ -57,9 +60,7 @@ def calculate_hours(df):
         while i < len(messages) - 1:
             msg1 = messages[i]
             msg2 = messages[i + 1]
-            # Clock In keywords: in, back, return
-            # Clock Out keywords: out, lunch
-            if any(x in msg1 for x in ['in', 'back', 'return']) and any(x in msg2 for x in ['out', 'lunch']):
+            if 'in' in msg1 and ('out' in msg2 or 'lunch' in msg2):
                 duration = times[i + 1] - times[i]
                 clock_in = times[i].strftime('%I:%M %p')
                 clock_out = times[i + 1].strftime('%I:%M %p')
@@ -89,6 +90,7 @@ def calculate_hours(df):
 
     return daily_df, weekly_summary
 
+
 def get_last_week_data(daily_df):
     today = datetime.now().date()
     this_monday = today - timedelta(days=today.weekday())
@@ -109,11 +111,13 @@ def get_last_week_data(daily_df):
 
     return last_week_df, last_monday, last_sunday
 
+
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Sheet1')
     return output.getvalue()
+
 
 # --- Main Execution ---
 if uploaded_file:
