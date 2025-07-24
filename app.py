@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime, timedelta
+from io import BytesIO
 
 st.set_page_config(page_title="WhatsApp Work Hours", layout="centered")
 
@@ -98,11 +99,11 @@ def get_last_week_data(daily_df):
     # Get the latest date in the dataset
     latest_date = temp_df['Date_Parsed'].max().date()
 
-    # Always use the full week (Mon–Sun) that contains the latest date
+    # Use the full week (Mon–Sun) that contains the latest date
     week_monday = latest_date - timedelta(days=latest_date.weekday())
     week_sunday = week_monday + timedelta(days=6)
 
-    # Filter the full week regardless of weekend coverage
+    # Filter for that full week
     last_week_df = temp_df[
         temp_df['Date_Parsed'].dt.date.between(week_monday, week_sunday)
     ].copy()
@@ -117,6 +118,13 @@ def get_last_week_data(daily_df):
         last_week_df.drop(columns=["Date_Parsed"], inplace=True)
 
     return last_week_df, week_monday, week_sunday
+
+def to_excel_bytes(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+    output.seek(0)
+    return output.getvalue()
 
 # --- Main Execution ---
 if uploaded_file:
@@ -136,18 +144,18 @@ if uploaded_file:
             # --- Daily Work Log ---
             st.subheader("🧾 Daily Work Log")
             st.dataframe(daily_df)
-            st.download_button("📥 Download Daily Logs",
-                               data=daily_df.to_csv(index=False).encode('utf-8'),
-                               file_name="Daily_Work_Log.csv",
-                               mime="text/csv")
+            st.download_button("📥 Download Daily Logs (Excel)",
+                               data=to_excel_bytes(daily_df),
+                               file_name="Daily_Work_Log.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
             # --- Weekly Summary ---
             st.subheader("📊 Weekly Total Hours per Person")
             st.dataframe(weekly_df)
-            st.download_button("📥 Download Weekly Summary",
-                               data=weekly_df.to_csv(index=False).encode('utf-8'),
-                               file_name="Weekly_Total_Hours_Summary.csv",
-                               mime="text/csv")
+            st.download_button("📥 Download Weekly Summary (Excel)",
+                               data=to_excel_bytes(weekly_df),
+                               file_name="Weekly_Total_Hours_Summary.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
             # --- Last Week Workday Timesheet ---
             last_week_df, last_monday, last_sunday = get_last_week_data(daily_df)
@@ -156,8 +164,8 @@ if uploaded_file:
                 st.subheader(f"📆 {title}")
                 st.dataframe(last_week_df)
 
-                csv_name = title.replace(" ", "_") + ".csv"
-                st.download_button(f"📥 Download {title}",
-                                   data=last_week_df.to_csv(index=False).encode('utf-8'),
+                csv_name = title.replace(" ", "_") + ".xlsx"
+                st.download_button(f"📥 Download {title} (Excel)",
+                                   data=to_excel_bytes(last_week_df),
                                    file_name=csv_name,
-                                   mime="text/csv")
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
