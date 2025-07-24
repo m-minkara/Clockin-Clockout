@@ -94,22 +94,35 @@ def get_last_week_data(daily_df):
 
     temp_df = daily_df.copy()
     temp_df['Date_Parsed'] = pd.to_datetime(temp_df['Date'])
-    max_date = temp_df['Date_Parsed'].max().date()
-    last_monday = max_date - timedelta(days=max_date.weekday() + 7)
-    last_sunday = last_monday + timedelta(days=6)
+    temp_df['Week'] = temp_df['Date_Parsed'].dt.isocalendar().week
+    temp_df['Year'] = temp_df['Date_Parsed'].dt.isocalendar().year
+
+    # Get complete weeks only
+    grouped = temp_df.groupby(['Year', 'Week'])
+    complete_weeks = [
+        (year, week) for (year, week), group in grouped
+        if set(group['Date_Parsed'].dt.weekday) == set(range(7))
+    ]
+
+    if not complete_weeks:
+        return pd.DataFrame(), None, None
+
+    latest_year, latest_week = sorted(complete_weeks, reverse=True)[0]
 
     last_week_df = temp_df[
-        temp_df['Date_Parsed'].dt.date.between(last_monday, last_sunday)
+        (temp_df['Year'] == latest_year) & (temp_df['Week'] == latest_week)
     ].copy()
 
-    if not last_week_df.empty:
-        total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
-        total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
-        last_week_df = last_week_df.merge(total_hours, on="Name")
-        last_week_df["Total Hours This Week"] = last_week_df.groupby("Name")["Total Hours This Week"].transform(
-            lambda x: [x.iloc[0]] + [''] * (len(x) - 1)
-        )
-        last_week_df.drop(columns=["Date_Parsed"], inplace=True)
+    last_monday = last_week_df['Date_Parsed'].min().date()
+    last_sunday = last_monday + timedelta(days=6)
+
+    total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
+    total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
+    last_week_df = last_week_df.merge(total_hours, on="Name")
+    last_week_df["Total Hours This Week"] = last_week_df.groupby("Name")["Total Hours This Week"].transform(
+        lambda x: [x.iloc[0]] + [''] * (len(x) - 1)
+    )
+    last_week_df.drop(columns=["Date_Parsed", "Week", "Year"], inplace=True)
 
     return last_week_df, last_monday, last_sunday
 
