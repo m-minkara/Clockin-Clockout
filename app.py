@@ -95,16 +95,16 @@ def get_last_week_data(daily_df):
     temp_df = daily_df.copy()
     temp_df['Date_Parsed'] = pd.to_datetime(temp_df['Date'])
 
-    # Latest date present in the dataset
+    # Get the latest date in the dataset
     latest_date = temp_df['Date_Parsed'].max().date()
 
-    # Always take the most recent completed Sunday relative to that latest date
-    last_sunday = latest_date - timedelta(days=latest_date.weekday() + 1)
-    last_monday = last_sunday - timedelta(days=6)
+    # Always use the full week (Mon–Sun) that contains the latest date
+    week_monday = latest_date - timedelta(days=latest_date.weekday())
+    week_sunday = week_monday + timedelta(days=6)
 
-    # Filter the Monday–Sunday block that ends on that Sunday
+    # Filter the full week regardless of weekend coverage
     last_week_df = temp_df[
-        temp_df['Date_Parsed'].dt.date.between(last_monday, last_sunday)
+        temp_df['Date_Parsed'].dt.date.between(week_monday, week_sunday)
     ].copy()
 
     if not last_week_df.empty:
@@ -116,7 +116,7 @@ def get_last_week_data(daily_df):
         )
         last_week_df.drop(columns=["Date_Parsed"], inplace=True)
 
-    return last_week_df, last_monday, last_sunday
+    return last_week_df, week_monday, week_sunday
 
 # --- Main Execution ---
 if uploaded_file:
