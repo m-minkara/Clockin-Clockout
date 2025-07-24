@@ -97,17 +97,20 @@ def get_last_week_data(daily_df):
     temp_df['Week'] = temp_df['Date_Parsed'].dt.isocalendar().week
     temp_df['Year'] = temp_df['Date_Parsed'].dt.isocalendar().year
 
-    # Get complete weeks only
-    grouped = temp_df.groupby(['Year', 'Week'])
-    complete_weeks = [
-        (year, week) for (year, week), group in grouped
-        if set(group['Date_Parsed'].dt.weekday) == set(range(7))
-    ]
+    # Group by week and check if all 7 days are present in that week
+    week_day_coverage = (
+        temp_df.groupby(['Year', 'Week'])['Date_Parsed']
+        .apply(lambda x: set(x.dt.weekday))
+        .reset_index()
+    )
+    complete_weeks = week_day_coverage[
+        week_day_coverage['Date_Parsed'].apply(lambda x: set(range(7)).issubset(x))
+    ][['Year', 'Week']]
 
-    if not complete_weeks:
+    if complete_weeks.empty:
         return pd.DataFrame(), None, None
 
-    latest_year, latest_week = sorted(complete_weeks, reverse=True)[0]
+    latest_year, latest_week = complete_weeks.sort_values(['Year', 'Week'], ascending=False).iloc[0]
 
     last_week_df = temp_df[
         (temp_df['Year'] == latest_year) & (temp_df['Week'] == latest_week)
