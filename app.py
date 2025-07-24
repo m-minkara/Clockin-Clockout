@@ -12,17 +12,20 @@ uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"])
 
 # --- Helper Functions ---
 def parse_custom_format(file_text):
-    pattern = r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}:\d{2})\u202f([APM]+)\] (.?): (.)"
+    pattern = r"^\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}(?::\d{2})?\s?[APMapm]{2})\] (.*?): (.*)"
     records = []
     for line in file_text.splitlines():
         match = re.match(pattern, line)
         if match:
-            date_str, time_str, ampm, name, message = match.groups()
-            timestamp_str = f"{date_str} {time_str} {ampm}"
+            date_str, time_str, name, message = match.groups()
+            timestamp_str = f"{date_str} {time_str.strip()}"
             try:
-                timestamp = datetime.strptime(timestamp_str, "%m/%d/%y %I:%M:%S %p")
+                try:
+                    timestamp = datetime.strptime(timestamp_str, "%m/%d/%y %I:%M %p")
+                except ValueError:
+                    timestamp = datetime.strptime(timestamp_str, "%m/%d/%y %I:%M:%S %p")
                 records.append({
-                    "name": name.strip(),  
+                    "name": name.strip(),
                     "timestamp": timestamp,
                     "message": message.strip().lower()
                 })
