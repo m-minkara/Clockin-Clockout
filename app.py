@@ -95,18 +95,14 @@ def get_last_week_data(daily_df):
     temp_df = daily_df.copy()
     temp_df['Date_Parsed'] = pd.to_datetime(temp_df['Date'])
 
-    # Get the latest date in the dataset
+    # Latest date present in the dataset
     latest_date = temp_df['Date_Parsed'].max().date()
 
-    # Determine the last full week based on latest date
-    if latest_date.weekday() == 0:  # Monday
-        last_sunday = latest_date - timedelta(days=1)
-    else:
-        last_sunday = latest_date - timedelta(days=latest_date.weekday() + 1)
-
+    # Always take the most recent completed Sunday relative to that latest date
+    last_sunday = latest_date - timedelta(days=latest_date.weekday() + 1)
     last_monday = last_sunday - timedelta(days=6)
 
-    # Filter for that week
+    # Filter the Monday–Sunday block that ends on that Sunday
     last_week_df = temp_df[
         temp_df['Date_Parsed'].dt.date.between(last_monday, last_sunday)
     ].copy()
