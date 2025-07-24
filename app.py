@@ -92,40 +92,25 @@ def get_last_week_data(daily_df):
     if daily_df.empty:
         return pd.DataFrame(), None, None
 
-    temp_df = daily_df.copy()
-    temp_df['Date_Parsed'] = pd.to_datetime(temp_df['Date'])
-    temp_df['Week'] = temp_df['Date_Parsed'].dt.isocalendar().week
-    temp_df['Year'] = temp_df['Date_Parsed'].dt.isocalendar().year
-
-    # Group by week and check if all 7 days are present in that week
-    week_day_coverage = (
-        temp_df.groupby(['Year', 'Week'])['Date_Parsed']
-        .apply(lambda x: set(x.dt.weekday))
-        .reset_index()
-    )
-    complete_weeks = week_day_coverage[
-        week_day_coverage['Date_Parsed'].apply(lambda x: set(range(7)).issubset(x))
-    ][['Year', 'Week']]
-
-    if complete_weeks.empty:
-        return pd.DataFrame(), None, None
-
-    latest_year, latest_week = complete_weeks.sort_values(['Year', 'Week'], ascending=False).iloc[0]
-
-    last_week_df = temp_df[
-        (temp_df['Year'] == latest_year) & (temp_df['Week'] == latest_week)
-    ].copy()
-
-    last_monday = last_week_df['Date_Parsed'].min().date()
+    today = datetime.today().date()
+    last_monday = today - timedelta(days=today.weekday() + 7)  # Monday of the previous week
     last_sunday = last_monday + timedelta(days=6)
 
-    total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
-    total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
-    last_week_df = last_week_df.merge(total_hours, on="Name")
-    last_week_df["Total Hours This Week"] = last_week_df.groupby("Name")["Total Hours This Week"].transform(
-        lambda x: [x.iloc[0]] + [''] * (len(x) - 1)
-    )
-    last_week_df.drop(columns=["Date_Parsed", "Week", "Year"], inplace=True)
+    temp_df = daily_df.copy()
+    temp_df['Date_Parsed'] = pd.to_datetime(temp_df['Date'])
+
+    last_week_df = temp_df[
+        temp_df['Date_Parsed'].dt.date.between(last_monday, last_sunday)
+    ].copy()
+
+    if not last_week_df.empty:
+        total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
+        total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
+        last_week_df = last_week_df.merge(total_hours, on="Name")
+        last_week_df["Total Hours This Week"] = last_week_df.groupby("Name")["Total Hours This Week"].transform(
+            lambda x: [x.iloc[0]] + [''] * (len(x) - 1)
+        )
+        last_week_df.drop(columns=["Date_Parsed"], inplace=True)
 
     return last_week_df, last_monday, last_sunday
 
