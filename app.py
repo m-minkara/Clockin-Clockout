@@ -6,14 +6,13 @@ from io import BytesIO
 
 st.set_page_config(page_title="WhatsApp Work Hours", layout="centered")
 
-st.title("🕒 WhatsApp Work Hours Calculator") 
+st.title("🕒 WhatsApp Work Hours Calculator")
 st.markdown("Upload your exported WhatsApp group chat (.txt) to calculate total hours worked per person.")
 
 uploaded_file = st.file_uploader("📂 Upload WhatsApp .txt file", type=["txt"])
 
-# --- Helper Functions ---
 def parse_custom_format(file_text):
-    pattern = r"^\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}(?::\d{2})?\s?[APMapm]{2})\] (.*?): (.*)"
+    pattern = r"^\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}(?::\d{2})?\s?[APMapm]{2})\] (.*?): (.+)"
     records = []
     for line in file_text.splitlines():
         match = re.match(pattern, line)
@@ -67,10 +66,10 @@ def calculate_hours(df):
                     'Name': name,
                     'Date': date.strftime('%b %d, %Y'),
                     'Day': times[i].strftime('%A'),
-                    'Week': week_range,
                     'Clock In': clock_in,
                     'Clock Out': clock_out,
-                    'Hours Worked': round(duration.total_seconds() / 3600, 2)
+                    'Hours Worked': round(duration.total_seconds() / 3600, 2),
+                    'Week': week_range
                 })
                 i += 2
             else:
@@ -96,14 +95,10 @@ def get_last_week_data(daily_df):
     temp_df = daily_df.copy()
     temp_df['Date_Parsed'] = pd.to_datetime(temp_df['Date'])
 
-    # Get the latest date in the dataset
     latest_date = temp_df['Date_Parsed'].max().date()
-
-    # Use the full week (Mon–Sun) that contains the latest date
     week_monday = latest_date - timedelta(days=latest_date.weekday())
     week_sunday = week_monday + timedelta(days=6)
 
-    # Filter for that full week
     last_week_df = temp_df[
         temp_df['Date_Parsed'].dt.date.between(week_monday, week_sunday)
     ].copy()
@@ -112,17 +107,34 @@ def get_last_week_data(daily_df):
         total_hours = last_week_df.groupby("Name")["Hours Worked"].sum().reset_index()
         total_hours.rename(columns={"Hours Worked": "Total Hours This Week"}, inplace=True)
         last_week_df = last_week_df.merge(total_hours, on="Name")
+
+        last_week_df["Name_display"] = last_week_df["Name"].mask(last_week_df["Name"].duplicated(), '')
+        last_week_df["Date_display"] = last_week_df.groupby("Name")["Date"].transform(lambda x: x.mask(x.duplicated(), ''))
+        last_week_df["Day_display"] = last_week_df.groupby("Name")["Day"].transform(lambda x: x.mask(x.duplicated(), ''))
+
         last_week_df["Total Hours This Week"] = last_week_df.groupby("Name")["Total Hours This Week"].transform(
             lambda x: [x.iloc[0]] + [''] * (len(x) - 1)
         )
-        last_week_df.drop(columns=["Date_Parsed"], inplace=True)
+
+        last_week_df = last_week_df[
+            ["Name_display", "Date_display", "Day_display", "Clock In", "Clock Out", "Hours Worked", "Total Hours This Week"]
+        ]
+        last_week_df.rename(columns={
+            "Name_display": "Name",
+            "Date_display": "Date",
+            "Day_display": "Day"
+        }, inplace=True)
 
     return last_week_df, week_monday, week_sunday
 
-def to_excel_bytes(df):
+def to_excel_bytes_with_title(df, title):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
+        df.to_excel(writer, sheet_name='Sheet1', startrow=1, index=False)
+        workbook = writer.book
+        worksheet = writer.sheets['Sheet1']
+        header_format = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 14})
+        worksheet.merge_range(0, 0, 0, len(df.columns)-1, title, header_format)
     output.seek(0)
     return output.getvalue()
 
@@ -137,7 +149,7 @@ if uploaded_file:
         daily_df, weekly_df = calculate_hours(df)
 
         if daily_df.empty:
-            st.warning("⚠️ No valid IN/OUT pairs found.")
+            st.warning("⚠ No valid IN/OUT pairs found.")
         else:
             st.success("✅ Successfully processed the chat file!")
 
@@ -145,7 +157,7 @@ if uploaded_file:
             st.subheader("🧾 Daily Work Log")
             st.dataframe(daily_df)
             st.download_button("📥 Download Daily Logs (Excel)",
-                               data=to_excel_bytes(daily_df),
+                               data=to_excel_bytes_with_title(daily_df, "Daily Work Log"),
                                file_name="Daily_Work_Log.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -153,7 +165,7 @@ if uploaded_file:
             st.subheader("📊 Weekly Total Hours per Person")
             st.dataframe(weekly_df)
             st.download_button("📥 Download Weekly Summary (Excel)",
-                               data=to_excel_bytes(weekly_df),
+                               data=to_excel_bytes_with_title(weekly_df, "Weekly Total Hours Summary"),
                                file_name="Weekly_Total_Hours_Summary.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -166,6 +178,6 @@ if uploaded_file:
 
                 csv_name = title.replace(" ", "_") + ".xlsx"
                 st.download_button(f"📥 Download {title} (Excel)",
-                                   data=to_excel_bytes(last_week_df),
+                                   data=to_excel_bytes_with_title(last_week_df, title),
                                    file_name=csv_name,
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
